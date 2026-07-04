@@ -37,10 +37,59 @@ CodeBuddy AI Agent 技能合集。
 
 ## 安装
 
-将所需 skill 目录复制到 CodeBuddy 的 skills 路径：
+### 方式一：CodeBuddy Agent 自动安装（推荐）
+
+在 CodeBuddy 对话中直接对 AI 说：
+
+> 帮我安装"PDF教辅材料后处理"这个技能：https://github.com/phirov/phirov-skills/pdf-edu-processor
+
+AI 会自动完成以下工作：
+1. 克隆本仓库到本地
+2. 复制 `pdf-edu-processor` 目录到 `~/.codebuddy/skills/`
+3. 校验 SKILL.md 完整性
+4. 告知安装完成
+
+### 方式二：手动安装
 
 ```bash
-cp -r pdf-edu-processor ~/.codebuddy/skills/
+# 1. 克隆整个仓库（用于查看所有 skill 源码和文档）
+git clone https://github.com/phirov/phirov-skills.git
+
+# 2. 复制单个 skill 目录到 CodeBuddy skills 路径
+cp -r phirov-skills/pdf-edu-processor ~/.codebuddy/skills/
+
+# 3. （可选）校验安装结果
+ls ~/.codebuddy/skills/pdf-edu-processor/
+# 应看到：CHANGELOG.md  SKILL.md  scripts/
+
+# 4. （可选）安装依赖
+pip3 install PyMuPDF
+```
+
+### 安装验证
+
+安装完成后，在 CodeBuddy 对话中尝试触发 skill：
+
+> 我有一份教辅 PDF 含有教师署名和角标水印，请帮我清理页眉、重编号页码并美化目录。
+
+如果 AI 识别到 `pdf-edu-processor` 技能并开始读取 `~/.codebuddy/skills/pdf-edu-processor/SKILL.md`，说明安装成功。
+
+### 升级
+
+```bash
+# 拉取最新代码
+cd phirov-skills && git pull
+
+# 覆盖更新
+cp -rf pdf-edu-processor ~/.codebuddy/skills/
+```
+
+或者使用 GitHub Release 页面下载指定版本：[Releases](https://github.com/phirov/phirov-skills/releases)
+
+### 卸载
+
+```bash
+rm -rf ~/.codebuddy/skills/pdf-edu-processor
 ```
 
 ## 许可
