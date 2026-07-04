@@ -17,32 +17,122 @@ import os
 # 输入文件
 INPUT_PDF = "/workspace/input.pdf"
 
+# 输出文件路径
+OUTPUT_PDF = "/workspace/02-应用专题-学生版-整理后.pdf"
+
 # 页眉中需要删除的文字（任意匹配即触发）
 HEADER_TEXTS = ["@建宇老师", "方法学得牛", "剑指双一流"]
 
-# 页码偏移量：content_page = original_page - PAGE_OFFSET
+# 页码偏移量：new_page = original_page - PAGE_OFFSET
+# 原文目录页=7(罗马i), 内容页8→1, 9→2, ... 100→93
 PAGE_OFFSET = 7
 
-# 目录页索引（0-based）
-TOC_PAGE_INDEX = 0
+# 目录页索引（0-based）= PDF第3页 → 索引2
+TOC_PAGE_INDEX = 2
+
+# 内容页起始索引（0-based）= PDF第5页 → 索引4
+CONTENT_START_INDEX = 4
 
 # 目录页自身页码是否改为罗马数字 "i"
 TOC_AS_ROMAN = True
 
-# 是否删除水印（Artifact + 内联文字水印）
-REMOVE_WATERMARK = True
+# 是否删除水印（本文件无水印，跳过）
+REMOVE_WATERMARK = False
 
-# 文件保存路径（None 表示覆盖原文件）
-OUTPUT_PDF = None  # 设为路径字符串可另存，如 "/workspace/output.pdf"
+# 跳过页眉删除的页面索引
+# P1=封面(0), P2=空白(1), P3=目录(2-保留), P4=空白(3)
+# 目录保留页眉以便维持原版式，其余正文页(P5=索引4起)都删除页眉
+SKIP_INDICES = {0, 1, 3}
 
 # 章节定义：[编号, 标题, 新页码, PDF索引]
 # 新页码 = 原始页码 - PAGE_OFFSET
 # PDF索引 = 原始页码在PDF中的0-based索引
 # 注意：不再需要手动配置 x 坐标和 TOC_Y_POSITIONS，脚本自动从 PDF 提取
+# 章节定义：[编号, 标题, 新页码]
+# 新页码 = 原页码 - PAGE_OFFSET
+# PDF 0-based 索引 = CONTENT_START_INDEX + (新页码 - 1)
+#   推导公式：书签/链接指向的页 = 内容起始页 + (新页码 - 1)
+#   例如：新页码=1 → 索引 4+0=4 (P5)，新页码=5 → 索引 4+4=8 (P9)
+# 不再需要手动配置 PDF 索引，脚本自动推导（见 _resolve_chapters）
 CHAPTERS = [
-    # 示例 — 请根据实际 PDF 替换
-    # (1, "1 一元一次方程的解法", 1, 8),
+    (1,  "1.一元一次方程的解法",   1),
+    (2,  "2.一元一次方程的应用",   5),
+    (3,  "3.二元一次方程组解法",   9),
+    (4,  "4.二元一次方程组应用",   13),
+    (5,  "5.不定方程（组）解法",   17),
+    (6,  "6.不定方程（组）应用",   21),
+    (7,  "7.归一归总问题",         25),
+    (8,  "8.还原问题",             29),
+    (9,  "9.和差问题",             34),
+    (10, "10.和倍问题",            38),
+    (11, "11.差倍问题",            42),
+    (12, "12.植树问题",            46),
+    (13, "13.盈亏问题",            50),
+    (14, "14.年龄问题",            54),
+    (15, "15.鸡兔同笼问题",        58),
+    (16, "16.平均数问题",          62),
+    (17, "17.周期问题",            66),
+    (18, "18.牛吃草问题",          70),
+    (19, "19.分数百分数问题",      74),
+    (20, "20.用比例解应用题",      79),
+    (21, "21.经济问题",            83),
+    (22, "22.浓度问题",            87),
+    (23, "23.工程问题",            91),
 ]
+
+
+# ============================================================
+# 辅助函数
+# ============================================================
+
+def _resolve_chapters():
+    """将 CHAPTERS 简写形式 [编号, 标题, 新页码] 展开为 [编号, 标题, 新页码, PDF索引(0-based)]
+
+    推导公式：PDF索引 = CONTENT_START_INDEX + (新页码 - 1)
+        - 新页码=1 → 索引 4 (P5, 内容起始页)
+        - 新页码=5 → 索引 8 (P9)
+
+    同时进行断言校验：
+        - 编号必须从 1 连续递增
+        - 新页码必须从 1 开始，单调递增
+        - 推导出的 PDF 索引必须 < 总页数
+    """
+    if not CHAPTERS:
+        raise ValueError("CHAPTERS 不能为空")
+
+    # 校验原始配置结构
+    for i, ch in enumerate(CHAPTERS):
+        if len(ch) != 3:
+            raise ValueError(
+                f"CHAPTERS 第 {i+1} 项格式错误: 期望 [编号, 标题, 新页码] 3 元素, "
+                f"实际 {len(ch)} 元素: {ch}"
+            )
+
+    # 推导 PDF 索引
+    resolved = []
+    expected_num = 1
+    expected_min_page = 1
+    for ch in CHAPTERS:
+        num, title, new_page = ch
+        pdf_idx = CONTENT_START_INDEX + (new_page - 1)
+
+        # 校验编号连续
+        if num != expected_num:
+            raise ValueError(
+                f"章节编号不连续: 期望 {expected_num}, 实际 {num} (标题: {title})"
+            )
+        expected_num += 1
+
+        # 校验新页码单调递增
+        if new_page < expected_min_page:
+            raise ValueError(
+                f"新页码必须单调递增: '{title}' 新页码 {new_page} < 上一章 {expected_min_page}"
+            )
+        expected_min_page = new_page
+
+        resolved.append((num, title, new_page, pdf_idx))
+
+    return resolved
 
 
 # ============================================================
@@ -180,14 +270,18 @@ def renumber_pages(doc, content_start_index=2):
     print("[3/5] 页码已重编号")
 
 
-def rebuild_toc(doc):
+def rebuild_toc(doc, resolved_chapters):
     """重建目录页 dots 和页码（overlay=True 白块覆盖 + 动态坐标提取）
+
+    参数：
+        resolved_chapters: 完整 [编号, 标题, 新页码, PDF索引(0-based)] 列表
 
     核心原理：
     1. 使用 get_text("dict") 自动提取每行 dots span 的精确坐标
-    2. 用 overlay=True 的白块覆盖旧 dots + 旧页码（白块在顶层）
-    3. insert_text 在白块之后调用，确保新内容在最顶层
-    4. insert_y = span_y0 + 15（与旧页码基线对齐）
+    2. 先用 add_redact_annot + apply_redactions 彻底清除旧 dots 和旧页码文本层
+    3. 用 overlay=True 的白块覆盖旧 dots + 旧页码（白块在顶层）
+    4. insert_text 在白块之后调用，确保新内容在最顶层
+    5. insert_y = span_y0 + 15（与旧页码基线对齐）
     """
     DOT_W = fitz.get_text_length(".", "TiRo", 14.1)
     DIGIT_W = fitz.get_text_length("0", "TiRo", 14.1)
@@ -195,8 +289,19 @@ def rebuild_toc(doc):
     page0 = doc[TOC_PAGE_INDEX]
     lines_data = get_toc_lines_data(page0)
 
-    if len(lines_data) != len(CHAPTERS):
-        print(f"  ⚠ 警告: dots 行数 ({len(lines_data)}) ≠ CHAPTERS 配置数 ({len(CHAPTERS)})")
+    if len(lines_data) != len(resolved_chapters):
+        print(f"  ⚠ 警告: dots 行数 ({len(lines_data)}) ≠ 章节配置数 ({len(resolved_chapters)})")
+
+    # 步骤0: 清除目录行末旧页码（数字部分），保留 dots 文本层供后续使用
+    # Quark的dots+页码是同一span，redact范围仅限行末数字（x>525）避免破坏dots
+    for line in lines_data:
+        # 行末页码数字区域（x>525，dots span 终点 538.6 后是数字）
+        # 由于 dots+pageNum 在同 span，精确切分需根据字符数估算
+        # 旧页码最长2位数字，约占 x=535~545
+        page0.add_redact_annot(
+            fitz.Rect(530, line["y0"], 545, line["y1"]), text=""
+        )
+    page0.apply_redactions()
 
     # 步骤1: 画白块覆盖旧 dots + 旧页码（overlay=True，确保在旧内容之上）
     for line in lines_data:
@@ -207,9 +312,9 @@ def rebuild_toc(doc):
 
     # 步骤2: 插入新 dots 和页码（在 draw_rect 之后调用，确保在最顶层）
     for i, line in enumerate(lines_data):
-        if i >= len(CHAPTERS):
+        if i >= len(resolved_chapters):
             break
-        new_page = CHAPTERS[i][2]
+        new_page = resolved_chapters[i][2]
         page_str = str(new_page)
         num_width = len(page_str) * DIGIT_W
         insert_x = line["x0"] - 2
@@ -235,17 +340,33 @@ def rebuild_toc(doc):
     print(f"[4/5] 目录页已美化 ({len(lines_data)} 行)")
 
 
-def add_navigation(doc):
-    """添加书签和目录跳转链接（使用动态提取的行坐标）"""
+def add_navigation(doc, resolved_chapters):
+    """添加书签和目录跳转链接（使用动态提取的行坐标）
+
+    参数：
+        resolved_chapters: 完整 [编号, 标题, 新页码, PDF索引(0-based)] 列表
+    """
     page0 = doc[TOC_PAGE_INDEX]
     lines_data = get_toc_lines_data(page0)
 
-    # 书签
-    toc_list = [[1, ch[1], ch[3] + 1] for ch in CHAPTERS]
+    if len(lines_data) != len(resolved_chapters):
+        print(f"  ⚠ 警告: dots 行数 ({len(lines_data)}) ≠ 章节配置数 ({len(resolved_chapters)})")
+
+    # 校验：推导出的 PDF 索引不能超出文档范围
+    for num, title, new_page, pdf_idx in resolved_chapters:
+        if pdf_idx < 0 or pdf_idx >= doc.page_count:
+            raise ValueError(
+                f"章节 {num} '{title}' 推导的 PDF 索引 {pdf_idx} 超出范围 "
+                f"[0, {doc.page_count-1}]。请检查 CONTENT_START_INDEX={CONTENT_START_INDEX} "
+                f"和新页码 {new_page} 是否匹配实际 PDF 结构。"
+            )
+
+    # 书签：pdf_idx + 1 = 1-based PDF 页码
+    toc_list = [[1, title, pdf_idx + 1] for _, title, _, pdf_idx in resolved_chapters]
     doc.set_toc(toc_list)
 
-    # TOC 链接（使用实际 span 的 y 范围，自动适配）
-    for i, (_, _, _, pdf_idx) in enumerate(CHAPTERS):
+    # TOC 链接：使用动态提取的行坐标
+    for i, (_, title, new_page, pdf_idx) in enumerate(resolved_chapters):
         if i < len(lines_data):
             line = lines_data[i]
             page0.insert_link({
@@ -254,11 +375,15 @@ def add_navigation(doc):
                 "page": pdf_idx,
             })
 
-    print(f"[5/5] 导航已添加 (书签 {len(toc_list)} 个, 链接 {len(CHAPTERS)} 个)")
+    print(f"[5/5] 导航已添加 (书签 {len(toc_list)} 个, 链接 {len(resolved_chapters)} 个)")
 
 
-def verify(doc):
-    """验证处理结果"""
+def verify(doc, resolved_chapters):
+    """验证处理结果
+
+    参数：
+        resolved_chapters: 完整 [编号, 标题, 新页码, PDF索引(0-based)] 列表
+    """
     print("\n" + "=" * 60)
     print("验证结果")
     print("=" * 60)
@@ -312,22 +437,63 @@ def verify(doc):
     links = [l for l in doc[TOC_PAGE_INDEX].get_links() if l["kind"] == fitz.LINK_GOTO]
     print(f"  ✅ 目录链接: {len(links)} 个")
 
+    # 链接精准性验证：每个链接的目标页应包含对应章节标题
+    print("\n  --- 链接精准性校验 ---")
+    mismatch_count = 0
+    for i, link in enumerate(links):
+        if i >= len(resolved_chapters):
+            break
+        _, expected_title, _, _ = resolved_chapters[i]
+        target_idx = link["page"]
+        if target_idx < 0 or target_idx >= doc.page_count:
+            print(f"  ⚠ link{i} 目标页 {target_idx} 超出范围")
+            mismatch_count += 1
+            continue
+        # 取目标页文本，截取章节编号部分
+        target_text = doc[target_idx].get_text()
+        # 提取章节编号，如 "1." "12." "23."
+        num_str = str(i + 1) + "."
+        if num_str in target_text:
+            # 进一步校验：章节标题前 5 个汉字是否匹配
+            short_title = expected_title.split(".", 1)[1][:5] if "." in expected_title else expected_title[:5]
+            if short_title in target_text:
+                pass  # 匹配，静默通过
+            else:
+                print(f"  ⚠ link{i} → P{target_idx+1}: 编号匹配但标题不符 (期望 '{short_title}')")
+                mismatch_count += 1
+        else:
+            print(f"  ⚠ link{i} → P{target_idx+1}: 未找到章节编号 '{num_str}'")
+            mismatch_count += 1
+    if mismatch_count == 0:
+        print(f"  ✅ 所有 {len(links)} 个链接均精准命中目标章节")
+
 
 def main():
-    if not CHAPTERS:
-        print("请先配置 CHAPTERS 参数（章节编号、标题、新页码、PDF索引）")
-        return
+    # 1. 解析并校验 CHAPTERS（自动推导 PDF 索引）
+    resolved_chapters = _resolve_chapters()
+    print(f"已加载 {len(resolved_chapters)} 个章节，自动推导 PDF 索引：")
+    for num, title, new_page, pdf_idx in resolved_chapters[:3]:
+        print(f"   第{num}章 新页码={new_page} → PDF P{pdf_idx+1}（索引 {pdf_idx}）")
+    if len(resolved_chapters) > 3:
+        print(f"   ... 共 {len(resolved_chapters)} 项")
+    print()
 
     doc = fitz.open(INPUT_PDF)
     print(f"处理文件: {INPUT_PDF} ({doc.page_count} 页)")
 
-    # 注意：先删水印再删页眉，避免 redact 改写内容流导致水印正则失效
+    # 2. 校验：内容起始索引必须 < 总页数
+    if CONTENT_START_INDEX >= doc.page_count:
+        raise ValueError(
+            f"CONTENT_START_INDEX={CONTENT_START_INDEX} 超出文档范围（共 {doc.page_count} 页）"
+        )
+
+    # 3. 注意：先删水印再删页眉，避免 redact 改写内容流导致水印正则失效
     if REMOVE_WATERMARK:
         remove_watermarks(doc)
-    remove_headers(doc)
-    renumber_pages(doc)
-    rebuild_toc(doc)
-    add_navigation(doc)
+    remove_headers(doc, skip_indices=SKIP_INDICES)
+    renumber_pages(doc, content_start_index=CONTENT_START_INDEX)
+    rebuild_toc(doc, resolved_chapters)
+    add_navigation(doc, resolved_chapters)
 
     # 保存
     output = OUTPUT_PDF or INPUT_PDF
@@ -338,7 +504,7 @@ def main():
 
     # 验证
     doc2 = fitz.open(output)
-    verify(doc2)
+    verify(doc2, resolved_chapters)
     doc2.close()
 
     orig_size = os.path.getsize(INPUT_PDF)

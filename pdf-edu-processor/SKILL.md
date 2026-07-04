@@ -9,7 +9,7 @@ description: >-
 
 # PDF 教辅材料后处理
 
-> **v0.2.0** | 2026-07-04 | 修复目录页码错位、动态坐标提取
+> **v0.3.0** | 2026-07-05 | CHAPTERS 简化为 3 元组，自动推导 PDF 索引，新增链接精准性校验
 
 对教辅类 PDF 进行一系列后处理：清理页眉水印、重编号页码、美化目录、添加导航。
 
@@ -34,10 +34,12 @@ description: >-
 | `page_offset` | 页码偏移量（旧页码 - offset = 新页码） | `7`（页码 8→1, 9→2...） |
 | `toc_page_index` | 目录页 PDF 索引（0-based） | `2` |
 | `toc_as_roman` | 目录页页码是否改为罗马数字 | `true` |
-| `chapters` | 章节定义：`[[编号, 标题, 新页码, PDF索引], ...]` | 见脚本中的示例格式 |
+| `chapters` | 章节定义：`[[编号, 标题, 新页码], ...]`（v0.3.0 简化） | 见脚本中的示例格式 |
 | `remove_watermark` | 是否去除水印 | `true` |
 | `content_start_index` | 内容页起始 PDF 索引（0-based，跳过封面） | `4` |
 | `skip_indices` | 跳过页眉删除的页面索引集合 | `{0, 1, 3}` |
+
+> **v0.3.0 变更**：`chapters` 简化为 3 元组 `[编号, 标题, 新页码]`，PDF 索引由脚本自动推导（`pdf_idx = CONTENT_START_INDEX + (新页码 - 1)`），彻底消除人工配置错误。
 
 > **v0.2.0 变更**：`chapters` 不再需要手动配置 x 坐标和 `TOC_Y_POSITIONS`。脚本使用 `get_text("dict")` 自动提取目录页每行 dots span 的精确坐标。
 
@@ -58,8 +60,20 @@ python3 scripts/process.py
 - 水印命令是否残留
 - 目录页和内容页页码是否正确
 - 书签和目录跳转链接数量
+- **v0.3.0 新增**：每个目录链接的目标页内容校验，确保精准命中章节标题
 
 ## 核心技术要点
+
+### v0.3.0 CHAPTERS 自动推导（关键改进）
+
+**问题**：v0.2.0 中 `CHAPTERS` 第 4 列（PDF 0-based 索引）需手算，错配后所有书签和链接都跳错页（如"原页码 8"易与"PDF 第 8 页"混淆）。
+
+**解决方案**：
+1. `CHAPTERS` 简化为 3 元组 `[编号, 标题, 新页码]`，完全消除"PDF 索引"这一易错字段
+2. 新增 `_resolve_chapters()` 函数自动推导：`pdf_idx = CONTENT_START_INDEX + (新页码 - 1)`
+3. 启动时打印前 3 个章节的"新页码 → PDF 物理页"映射，便于人工核对
+4. 运行时断言：章节编号必须连续、新页码必须单调递增、推导的 PDF 索引必须在文档范围内
+5. `verify()` 新增逐链接目标页内容比对，确保书签和跳转链接真正指向章节标题页
 
 ### v0.2.0 目录美化（关键改进）
 
@@ -70,7 +84,7 @@ python3 scripts/process.py
 2. 用 `draw_rect(overlay=True)` 的白块覆盖旧 dots + 旧页码区域
 3. `insert_text` 在 `draw_rect` 之后调用，确保新内容始终在最顶层
 4. `insert_y = span_y0 + 15` 实现新页码与旧页码基线精确对齐
-5. `CHAPTERS` 简化：仅需 `[编号, 标题, 新页码, PDF索引]`，不再需要 x 坐标和 `TOC_Y_POSITIONS`
+5. `CHAPTERS` 简化：v0.2.0 需 4 元组 `[编号, 标题, 新页码, PDF索引]`；**v0.3.0 进一步简化为 3 元组 `[编号, 标题, 新页码]`**，PDF 索引自动推导
 
 ### 页眉删除
 使用 `page.add_redact_annot()` + `page.apply_redactions()` 彻底删除文本和图片。
