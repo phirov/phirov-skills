@@ -9,7 +9,7 @@ description: >-
 
 # PDF 教辅材料后处理
 
-> **v0.3.0** | 2026-07-05 | CHAPTERS 简化为 3 元组，自动推导 PDF 索引，新增链接精准性校验
+> **v0.3.1** | 2026-07-05 | CHAPTERS 简化为 3 元组，自动推导 PDF 索引，新增链接精准性校验
 
 对教辅类 PDF 进行一系列后处理：清理页眉水印、重编号页码、美化目录、添加导航。
 
@@ -29,7 +29,8 @@ description: >-
 
 | 参数 | 说明 | 示例 |
 |------|------|------|
-| `input_pdf` | 输入 PDF 路径或 URL | `/workspace/doc.pdf` 或 `https://...` |
+| `input_pdf` | 输入 PDF 路径或目录（v0.3.1） | `/workspace/我的教辅.pdf` 或 `/workspace/` |
+| `output_pdf` | 输出 PDF 路径（v0.3.1：None 时自动按原名+"-整理后"生成） | `None` 或 `/workspace/output.pdf` |
 | `header_texts` | 要删除的页眉文字列表 | `["@建宇老师", "方法学得牛", "剑指双一流"]` |
 | `page_offset` | 页码偏移量（旧页码 - offset = 新页码） | `7`（页码 8→1, 9→2...） |
 | `toc_page_index` | 目录页 PDF 索引（0-based） | `2` |
@@ -38,6 +39,8 @@ description: >-
 | `remove_watermark` | 是否去除水印 | `true` |
 | `content_start_index` | 内容页起始 PDF 索引（0-based，跳过封面） | `4` |
 | `skip_indices` | 跳过页眉删除的页面索引集合 | `{0, 1, 3}` |
+
+> **v0.3.1 变更**：`input_pdf` 支持目录路径（自动取该目录下第一个 PDF），`output_pdf` 留空时自动按"原名-整理后.pdf"生成。AI Agent 无需重命名上传文件，保持原文件名即可。
 
 > **v0.3.0 变更**：`chapters` 简化为 3 元组 `[编号, 标题, 新页码]`，PDF 索引由脚本自动推导（`pdf_idx = CONTENT_START_INDEX + (新页码 - 1)`），彻底消除人工配置错误。
 

@@ -14,11 +14,16 @@ import os
 # 配置区域 — 根据具体需求修改以下参数
 # ============================================================
 
-# 输入文件
-INPUT_PDF = "/workspace/input.pdf"
+# 输入文件（支持以下两种形式）：
+#   1. 单文件路径："/workspace/我的教辅.pdf"（推荐：保持上传原名）
+#   2. 目录路径："/workspace/"（自动取该目录下第一个 PDF 文件）
+# 留空时：先尝试 /workspace/<原名>.pdf，再回退到 /workspace/input.pdf
+INPUT_PDF = "/workspace/"
 
 # 输出文件路径
-OUTPUT_PDF = "/workspace/02-应用专题-学生版-整理后.pdf"
+# 设为 None 时自动按"原文件名-整理后.pdf"规则生成（如 我的教辅.pdf → 我的教辅-整理后.pdf）
+# 或显式指定路径："/workspace/my_output.pdf"
+OUTPUT_PDF = None
 
 # 页眉中需要删除的文字（任意匹配即触发）
 HEADER_TEXTS = ["@建宇老师", "方法学得牛", "剑指双一流"]
@@ -133,6 +138,70 @@ def _resolve_chapters():
         resolved.append((num, title, new_page, pdf_idx))
 
     return resolved
+
+
+def _resolve_paths():
+    """智能解析输入输出 PDF 路径
+
+    输入解析规则（INPUT_PDF 依次尝试）：
+        1. 若指向已存在的 .pdf 文件 → 直接使用
+        2. 若指向目录 → 取该目录下第一个 .pdf 文件
+        3. 留空或路径不存在 → 报错并给出搜索结果
+
+    输出解析规则（OUTPUT_PDF）：
+        1. 若显式设置 → 使用该路径
+        2. 若为 None → 在输入文件同目录下生成 "<原名>-整理后.pdf"
+
+    返回：
+        (input_path, output_path) 元组
+    """
+    # ---- 解析输入路径 ----
+    input_path = None
+
+    if not INPUT_PDF:
+        # 留空：扫描默认 workspace 目录
+        search_dirs = ["/workspace"]
+    elif os.path.isfile(INPUT_PDF):
+        # 是文件
+        input_path = INPUT_PDF
+    elif os.path.isdir(INPUT_PDF):
+        # 是目录
+        search_dirs = [INPUT_PDF]
+    else:
+        # 既不是文件也不是目录（路径不存在）
+        search_dirs = [os.path.dirname(INPUT_PDF) or "/workspace"]
+
+    if input_path is None:
+        # 在搜索目录中找第一个 PDF
+        for d in search_dirs:
+            if not os.path.isdir(d):
+                continue
+            for name in sorted(os.listdir(d)):
+                if name.lower().endswith(".pdf"):
+                    input_path = os.path.join(d, name)
+                    break
+            if input_path:
+                break
+
+    if input_path is None or not os.path.isfile(input_path):
+        raise FileNotFoundError(
+            f"未找到输入 PDF 文件。\n"
+            f"  INPUT_PDF = {INPUT_PDF!r}\n"
+            f"  搜索目录: {search_dirs}\n"
+            f"  请将待处理 PDF 放到 /workspace/ 目录，或在 INPUT_PDF 中显式指定路径"
+        )
+
+    # ---- 解析输出路径 ----
+    if OUTPUT_PDF:
+        output_path = OUTPUT_PDF
+    else:
+        # 默认：同目录 + "<原名>-整理后.pdf"
+        dir_name = os.path.dirname(input_path)
+        base_name = os.path.basename(input_path)
+        stem, ext = os.path.splitext(base_name)
+        output_path = os.path.join(dir_name, f"{stem}-整理后{ext}")
+
+    return input_path, output_path
 
 
 # ============================================================
@@ -478,16 +547,22 @@ def main():
         print(f"   ... 共 {len(resolved_chapters)} 项")
     print()
 
-    doc = fitz.open(INPUT_PDF)
-    print(f"处理文件: {INPUT_PDF} ({doc.page_count} 页)")
+    # 2. 智能解析输入输出路径
+    input_path, output_path = _resolve_paths()
+    print(f"输入文件: {input_path}")
+    print(f"输出文件: {output_path}")
+    print()
 
-    # 2. 校验：内容起始索引必须 < 总页数
+    doc = fitz.open(input_path)
+    print(f"处理文件: {input_path} ({doc.page_count} 页)")
+
+    # 3. 校验：内容起始索引必须 < 总页数
     if CONTENT_START_INDEX >= doc.page_count:
         raise ValueError(
             f"CONTENT_START_INDEX={CONTENT_START_INDEX} 超出文档范围（共 {doc.page_count} 页）"
         )
 
-    # 3. 注意：先删水印再删页眉，避免 redact 改写内容流导致水印正则失效
+    # 4. 注意：先删水印再删页眉，避免 redact 改写内容流导致水印正则失效
     if REMOVE_WATERMARK:
         remove_watermarks(doc)
     remove_headers(doc, skip_indices=SKIP_INDICES)
@@ -495,21 +570,20 @@ def main():
     rebuild_toc(doc, resolved_chapters)
     add_navigation(doc, resolved_chapters)
 
-    # 保存
-    output = OUTPUT_PDF or INPUT_PDF
-    tmp = output + ".tmp"
+    # 5. 保存
+    tmp = output_path + ".tmp"
     doc.save(tmp, garbage=4, deflate=True)
     doc.close()
-    os.replace(tmp, output)
+    os.replace(tmp, output_path)
 
-    # 验证
-    doc2 = fitz.open(output)
+    # 6. 验证
+    doc2 = fitz.open(output_path)
     verify(doc2, resolved_chapters)
     doc2.close()
 
-    orig_size = os.path.getsize(INPUT_PDF)
-    new_size = os.path.getsize(output)
-    print(f"\n✅ 完成: {output}")
+    orig_size = os.path.getsize(input_path)
+    new_size = os.path.getsize(output_path)
+    print(f"\n✅ 完成: {output_path}")
     print(f"   原始大小: {orig_size / 1024:.0f} KB → 处理后: {new_size / 1024:.0f} KB")
 
 
