@@ -6,9 +6,17 @@ CodeBuddy AI Agent 技能合集。
 
 | 技能 | 版本 | 发布日期 | 说明 |
 |------|------|----------|------|
-| [pdf-edu-processor](pdf-edu-processor/) | [v0.3.0](https://github.com/phirov/phirov-skills/releases/tag/v0.3.0) | 2026-07-05 | PDF 教辅材料后处理 — 页眉/水印删除、页码重编号、目录美化、书签导航 |
+| [pdf-edu-processor](pdf-edu-processor/) | [v0.3.1](https://github.com/phirov/phirov-skills/releases/tag/v0.3.1) | 2026-07-05 | PDF 教辅材料后处理 — 页眉/水印删除、页码重编号、目录美化、书签导航 |
 
-## pdf-edu-processor 最新版本 (v0.3.0)
+## pdf-edu-processor 最新版本 (v0.3.1)
+
+### v0.3.1 新增（智能路径解析）
+
+- `INPUT_PDF` 支持单文件路径或目录路径：目录路径时自动取该目录下第一个 PDF
+- `OUTPUT_PDF` 留空时自动按"原名-整理后.pdf"生成（如 `我的教辅.pdf` → `我的教辅-整理后.pdf`）
+- 找不到文件时给出清晰提示
+
+**用户价值**：AI Agent 无需将上传的 PDF 重命名为 `input.pdf`，保留用户原文件名即可。
 
 ### 核心功能
 
@@ -17,20 +25,17 @@ CodeBuddy AI Agent 技能合集。
 - **页码重编号**：目录/正文页码偏移，支持罗马数字
 - **目录美化**：点号对齐、添加书签和跳转链接
 
-### v0.3.0 新增
+### v0.3.0 特性
 
-- **`_resolve_chapters()` 自动推导 PDF 索引**：`CHAPTERS` 简化为 3 元组 `[编号, 标题, 新页码]`，彻底消除人工配置错误
-- **链接精准性校验**：`verify()` 新增逐链接目标页内容比对，确保书签和跳转链接真正指向章节标题页
-- **运行时断言**：章节编号连续性、新页码单调递增、PDF 索引在文档范围内
-
-### v0.3.0 修复
-
-- 书签/目录链接跳错页（v0.2.0 引入）：`CHAPTERS` 第 4 列（PDF 索引）易混淆"原页码"和"PDF 物理页"，新版完全不需要这个字段
+- `_resolve_chapters()` 自动推导 PDF 索引：`CHAPTERS` 简化为 3 元组
+- 链接精准性校验：每个跳转链接都验证目标页内容
+- 运行时断言：章节编号连续性、新页码单调递增、PDF 索引在文档范围内
 
 ### 版本历史
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| [v0.3.1](https://github.com/phirov/phirov-skills/releases/tag/v0.3.1) | 2026-07-05 | 智能路径解析，保留上传文件原名 |
 | [v0.3.0](https://github.com/phirov/phirov-skills/releases/tag/v0.3.0) | 2026-07-05 | CHAPTERS 简化为 3 元组，自动推导 PDF 索引，链接精准性校验 |
 | [v0.2.0](https://github.com/phirov/phirov-skills/releases/tag/v0.2.0) | 2026-07-04 | 修复目录页码错位，动态坐标提取 |
 | [v0.1.0](https://github.com/phirov/phirov-skills/releases/tag/v0.1.0) | 2026-07-04 | 首次发布 |
