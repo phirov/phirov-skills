@@ -6,9 +6,20 @@ CodeBuddy AI Agent 技能合集。
 
 | 技能 | 版本 | 发布日期 | 说明 |
 |------|------|----------|------|
-| [pdf-edu-processor](pdf-edu-processor/) | [v0.3.1](https://github.com/phirov/phirov-skills/releases/tag/v0.3.1) | 2026-07-05 | PDF 教辅材料后处理 — 页眉/水印删除、页码重编号、目录美化、书签导航 |
+| [pdf-edu-processor](pdf-edu-processor/) | [v0.3.2](https://github.com/phirov/phirov-skills/releases/tag/v0.3.2) | 2026-07-05 | PDF 教辅材料后处理 — 页眉/水印删除、页码重编号、目录美化、书签导航 |
 
-## pdf-edu-processor 最新版本 (v0.3.1)
+## pdf-edu-processor 最新版本 (v0.3.2)
+
+### v0.3.2 新增（双模式页码）
+
+- `PAGE_NUMBER_MODE = "chinese" | "numeric" | "auto"`，默认 `auto`
+- `auto` 模式自动扫描前 5 页页脚识别中英文格式（"第N页 共M页" / "N/M" / "N of M" / "N"）
+- `numeric` 模式使用 TiRo 字体（不嵌 CJK，文件体积小），居中
+- 多页目录支持罗马数字 i/ii/iii/...
+- 新增 `PAGE_TOTAL` 配置项允许手动覆盖总页数
+- `verify()` 增强为 4 种页脚格式多模式匹配
+
+**用户价值**：英文/数字 PDF（如教材、试卷、扫描件）开箱即用，无需手动配置模式。
 
 ### v0.3.1 新增（智能路径解析）
 
@@ -23,6 +34,7 @@ CodeBuddy AI Agent 技能合集。
 - **页眉清理**：删除教师署名、机构标语、logo
 - **水印去除**：支持 Artifact BDC 块和内联文字两种模式
 - **页码重编号**：目录/正文页码偏移，支持罗马数字
+- **双模式页码**：chinese/numeric/auto 自动识别，支持纯数字/英文 of/数字斜杠
 - **目录美化**：点号对齐、添加书签和跳转链接
 
 ### v0.3.0 特性
@@ -35,6 +47,7 @@ CodeBuddy AI Agent 技能合集。
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| [v0.3.2](https://github.com/phirov/phirov-skills/releases/tag/v0.3.2) | 2026-07-05 | 双模式页码（chinese/numeric/auto），多页目录罗马数字，PAGE_TOTAL 手动覆盖 |
 | [v0.3.1](https://github.com/phirov/phirov-skills/releases/tag/v0.3.1) | 2026-07-05 | 智能路径解析，保留上传文件原名 |
 | [v0.3.0](https://github.com/phirov/phirov-skills/releases/tag/v0.3.0) | 2026-07-05 | CHAPTERS 简化为 3 元组，自动推导 PDF 索引，链接精准性校验 |
 | [v0.2.0](https://github.com/phirov/phirov-skills/releases/tag/v0.2.0) | 2026-07-04 | 修复目录页码错位，动态坐标提取 |

@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.3.2] - 2026-07-05
+
+### 新增
+- **`PAGE_NUMBER_MODE` 配置项**：`"chinese"` / `"numeric"` / `"auto"`（默认 `auto`）
+  - `chinese` 模式：处理 "第N页 共M页" 中文页脚（v0.3.1 行为）
+  - `numeric` 模式：处理 "N" / "N/M" / "N of M" 纯数字页脚
+  - `auto` 模式：自动扫描前 N 页页脚识别格式（向后兼容默认）
+- **`PAGE_TOTAL` 配置项**：默认 `None`（自动从页脚推断），可手动指定（如 `100`），用于扫描失败兜底
+- **`MODE_DETECT_SAMPLES` 配置项**：auto 模式扫描的样本页数（默认 `5`）
+- **`_resolve_page_mode()` 函数**：auto 模式下扫描前 N 页页脚，识别格式
+- **`_match_footer_token()` / `_match_footer_token_extended()` 函数**：4 种页脚正则匹配
+  - `^第\d+页(\s*共\d+页)?$`（中文复合）
+  - `^\d+\s*/\s*\d+$`（数字斜杠）
+  - `^\d+\s+of\s+\d+$`（英文 of，忽略大小写）
+  - `^\d+$`（纯数字）
+- **`_to_roman()` 函数**：1..3999 → 罗马数字，支持多页目录 ii/iii/iv/...
+- **`_count_toc_pages()` 函数**：自动识别目录页范围，连续多页依次输出罗马数字
+- **`_write_chinese_page()` / `_write_numeric_page()` 函数**：拆分中文/数字页写入逻辑
+
+### 改进
+- **双模式页码**：chinese 模式保持 v0.3.1 行为；numeric 模式使用 TiRo 字体居中（不嵌 CJK，文件体积小）
+- **多页目录**：numeric + `TOC_AS_ROMAN=True` 时连续输出 i/ii/iii/...
+- **total 同步**：原页脚的"共XX页" / "of XX" / 分母均按 `PAGE_OFFSET` 同步偏移
+- **`verify()` 多模式匹配**：兼容 4 种页脚格式的残留检测；新增"模式自检"行
+- **错误提示**：`PAGE_NUMBER_MODE` 取值非法时立即抛 `ValueError`
+
+### 向后兼容
+- 默认 `auto` 模式，扫描结果为 chinese 时行为与 v0.3.1 完全一致
+- 显式 `PAGE_NUMBER_MODE="chinese"` 可锁定旧行为
+- 所有 v0.3.1 配置项（INPUT_PDF / OUTPUT_PDF / PAGE_OFFSET / CHAPTERS / ...）保持不变
+
 ## [0.3.1] - 2026-07-05
 
 ### 新增

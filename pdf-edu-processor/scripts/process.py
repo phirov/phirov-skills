@@ -32,6 +32,19 @@ HEADER_TEXTS = ["@建宇老师", "方法学得牛", "剑指双一流"]
 # 原文目录页=7(罗马i), 内容页8→1, 9→2, ... 100→93
 PAGE_OFFSET = 7
 
+# 页码模式（v0.3.2 新增）：
+#   "chinese" - 中文页脚 "第N页 共M页"（v0.3.1 行为，使用 NotoSansCJK 字体）
+#   "numeric" - 纯数字页脚 "N" / "N/M" / "N of M"（使用 TiRo 字体，文件更小）
+#   "auto"    - 自动扫描前 MODE_DETECT_SAMPLES 页页脚识别格式（默认）
+PAGE_NUMBER_MODE = "auto"
+
+# auto 模式扫描的样本页数（建议 5）
+MODE_DETECT_SAMPLES = 5
+
+# 总页数显式覆盖：None = 自动从页脚推断；整数 = 强制使用
+# 用于 PDF 本身未含"共N页"标记的场景（如纯数字"N"页脚）
+PAGE_TOTAL = None
+
 # 目录页索引（0-based）= PDF第3页 → 索引2
 TOC_PAGE_INDEX = 2
 
@@ -42,7 +55,7 @@ CONTENT_START_INDEX = 4
 TOC_AS_ROMAN = True
 
 # 是否删除水印（本文件无水印，跳过）
-REMOVE_WATERMARK = False
+REMOVE_WATERMARK = True
 
 # 跳过页眉删除的页面索引
 # P1=封面(0), P2=空白(1), P3=目录(2-保留), P4=空白(3)
@@ -60,29 +73,24 @@ SKIP_INDICES = {0, 1, 3}
 #   例如：新页码=1 → 索引 4+0=4 (P5)，新页码=5 → 索引 4+4=8 (P9)
 # 不再需要手动配置 PDF 索引，脚本自动推导（见 _resolve_chapters）
 CHAPTERS = [
-    (1,  "1.一元一次方程的解法",   1),
-    (2,  "2.一元一次方程的应用",   5),
-    (3,  "3.二元一次方程组解法",   9),
-    (4,  "4.二元一次方程组应用",   13),
-    (5,  "5.不定方程（组）解法",   17),
-    (6,  "6.不定方程（组）应用",   21),
-    (7,  "7.归一归总问题",         25),
-    (8,  "8.还原问题",             29),
-    (9,  "9.和差问题",             34),
-    (10, "10.和倍问题",            38),
-    (11, "11.差倍问题",            42),
-    (12, "12.植树问题",            46),
-    (13, "13.盈亏问题",            50),
-    (14, "14.年龄问题",            54),
-    (15, "15.鸡兔同笼问题",        58),
-    (16, "16.平均数问题",          62),
-    (17, "17.周期问题",            66),
-    (18, "18.牛吃草问题",          70),
-    (19, "19.分数百分数问题",      74),
-    (20, "20.用比例解应用题",      79),
-    (21, "21.经济问题",            83),
-    (22, "22.浓度问题",            87),
-    (23, "23.工程问题",            91),
+    (1,  "1.几何图形的认识",            1),
+    (2,  "2.几何图形找规律",            9),
+    (3,  "3.角度的计算方法",           15),
+    (4,  "4.几何的空间想象",           21),
+    (5,  "5.巧求周长",                 25),
+    (6,  "6.图形的分割与拼接",         32),
+    (7,  "7.平移、旋转及割补",         38),
+    (8,  "8.不规则图形的面积",         43),
+    (9,  "9.格点图形的面积",           48),
+    (10, "10.三角形面积与底高的关系",  53),
+    (11, "11.相似三角形",              59),
+    (12, "12.四边形模型",              64),
+    (13, "13.梯形模型",                69),
+    (14, "14.燕尾模型",                74),
+    (15, "15.共角模型",                79),
+    (16, "16.圆与扇形",                84),
+    (17, "17.长方体及正方体",          90),
+    (18, "18.圆柱与圆锥",              96),
 ]
 
 
@@ -260,7 +268,7 @@ def remove_watermarks(doc):
         re.DOTALL,
     )
     pattern_inline = re.compile(
-        r'q\s+1\s+0\s+0\s+-1\s+0\s+0\s+cm\s+BT\s+/FT22.*?/GS13\s+gs.*?ET\s+Q',
+        r'q\s+1\s+0\s+0\s+-1\s+0\s+0\s+cm\s+BT\s+/FT(?:8|22).*?/GS13\s+gs.*?ET\s+Q',
         re.DOTALL,
     )
 
@@ -295,48 +303,277 @@ def remove_watermarks(doc):
 
 
 def renumber_pages(doc, content_start_index=2):
-    """重编号目录页和内容页页码"""
-    DIGIT_W = fitz.get_text_length("0", "TiRo", 9.0)
+    """重编号目录页和内容页页码（v0.3.2 双模式：chinese/numeric/auto）
 
-    # 目录页 → 罗马数字 "i"
+    v0.3.1 修复：原脚本用 isdigit() 判断页码词，但 Quark 生成的 PDF 把"第N页"分成
+    多个词（如 "第8"、"页共107"、"页"），纯数字词根本不存在，导致页码重编号
+    静默失效。
+
+    v0.3.2 增强：
+      1. 支持 chinese（"第N页 共M页"）和 numeric（"N" / "N/M" / "N of M"）两种页脚格式
+      2. auto 模式自动扫描前 MODE_DETECT_SAMPLES 页页脚识别格式
+      3. numeric 模式使用 TiRo 字体（不嵌 CJK，文件体积小）
+      4. 多页目录支持罗马数字 i/ii/iii/...
+      5. PAGE_TOTAL 手动覆盖总页数
+    """
+    # 优先使用系统 NotoSansCJK 字体支持中文"第/页"；否则回退到 TiRo（仅数字）
+    FONT_FILE = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+    try:
+        if not os.path.isfile(FONT_FILE):
+            FONT_FILE = None
+    except Exception:
+        FONT_FILE = None
+
+    # 模式解析
+    global _RESOLVED_MODE, _RESOLVED_TOTAL
+    _RESOLVED_MODE, _RESOLVED_TOTAL = _resolve_page_mode(doc, content_start_index)
+    if PAGE_TOTAL is not None:
+        # 用户手动覆盖：直接当作"新总数"，不再偏移
+        _RESOLVED_TOTAL = PAGE_TOTAL
+    elif _RESOLVED_TOTAL is not None:
+        # 从旧页脚推断的旧总数：按 PAGE_OFFSET 同步到新总数
+        _RESOLVED_TOTAL = _RESOLVED_TOTAL - PAGE_OFFSET
+
+    # 目录页：清空底部原始页码
     page0 = doc[TOC_PAGE_INDEX]
     words0 = page0.get_text("words")
     for w in words0:
-        if w[1] > 780 and w[4].strip().isdigit():
+        if w[1] > 770 and w[4].strip():
             page0.add_redact_annot(fitz.Rect(w[0] - 5, w[1] - 2, w[2] + 5, w[3] + 2))
-            break
     page0.apply_redactions()
+
     if TOC_AS_ROMAN:
-        page0.insert_text(
-            fitz.Point(294, 797), "i",
+        # 多页目录：依次输出 i, ii, iii, ...
+        toc_pages = _count_toc_pages(doc, content_start_index)
+        for k, idx in enumerate(toc_pages):
+            roman = _to_roman(k + 1)
+            doc[idx].insert_text(
+                fitz.Point(294, 797), roman,
+                fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
+            )
+    elif _RESOLVED_MODE == "numeric":
+        # numeric + 非 roman：把目录页当作内容页处理
+        old_num, old_total = _match_footer_token_extended(page0)
+        if old_num is not None:
+            new_num = old_num - PAGE_OFFSET
+            if new_num >= 1:
+                new_total = (old_total - PAGE_OFFSET) if old_total is not None else None
+                if new_total is None and _RESOLVED_TOTAL is not None:
+                    new_total = _RESOLVED_TOTAL
+                _write_numeric_page(page0, new_num, new_total)
+
+    # 内容页
+    count = 0
+    for i in range(content_start_index, doc.page_count):
+        page = doc[i]
+        old_num, old_total = _match_footer_token_extended(page)
+        if old_num is None:
+            continue
+        new_num = old_num - PAGE_OFFSET
+        if new_num < 1:
+            continue
+
+        if _RESOLVED_MODE == "chinese":
+            _write_chinese_page(page, new_num, _RESOLVED_TOTAL, FONT_FILE)
+        else:
+            new_total = (old_total - PAGE_OFFSET) if old_total is not None else None
+            if new_total is None and _RESOLVED_TOTAL is not None:
+                new_total = _RESOLVED_TOTAL
+            _write_numeric_page(page, new_num, new_total)
+        count += 1
+
+    print(f"[3/5] 页码已重编号 (mode={_RESOLVED_MODE}, total={_RESOLVED_TOTAL}, count={count})")
+
+
+# ============================================================
+# v0.3.2 新增：双模式页码辅助函数
+# ============================================================
+
+# 4 种页脚格式的正则（按优先级）
+_FOOTER_PATTERNS = [
+    # 1. 中文复合：第N页 / 第N页 共M页
+    re.compile(r'^第(\d+)页(\s*共(\d+)页)?$'),
+    # 2. 数字斜杠：N/M
+    re.compile(r'^(\d+)\s*/\s*(\d+)$'),
+    # 3. 英文 of：N of M
+    re.compile(r'^(\d+)\s+of\s+(\d+)$', re.IGNORECASE),
+    # 4. 纯数字：N
+    re.compile(r'^(\d+)$'),
+]
+
+
+def _collect_footer_text(page):
+    """收集页脚区域（y > 770）所有词，按 x 坐标拼接成单行字符串。
+    返回 (full_text, [(x_center, original_text), ...])。
+    """
+    words = page.get_text("words")
+    footer = [(w[0], w[4]) for w in words if w[1] > 770 and w[4].strip()]
+    if not footer:
+        return "", []
+    footer.sort(key=lambda x: x[0])  # 按 x 排序
+    full_text = "".join(t for _, t in footer)
+    return full_text, footer
+
+
+def _match_footer_token(page):
+    """从页面页脚区域提取当前页码数字。
+    返回 int 或 None（未匹配）。
+    匹配 4 种格式：第N页 / N/M / N of M / N（Quark 生成的 PDF 中"第N页"常被拆成多词，需拼接）
+    """
+    full_text, _ = _collect_footer_text(page)
+    if not full_text:
+        return None
+    # 优先级：复合模式（带"页"）→ 数字模式
+    if "页" in full_text:
+        m = _FOOTER_PATTERNS[0].match(full_text)
+        if m:
+            return int(m.group(1))
+    else:
+        for pat in _FOOTER_PATTERNS[1:3]:
+            m = pat.match(full_text)
+            if m:
+                return int(m.group(1))
+        m = _FOOTER_PATTERNS[3].match(full_text)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _match_footer_token_extended(page):
+    """从页面页脚区域提取 (当前页码, 总页数)。
+    返回 (int, int|None)。
+    """
+    full_text, _ = _collect_footer_text(page)
+    if not full_text:
+        return None, None
+    if "页" in full_text:
+        m = _FOOTER_PATTERNS[0].match(full_text)
+        if m:
+            return int(m.group(1)), (int(m.group(3)) if m.group(3) else None)
+    else:
+        for pat in _FOOTER_PATTERNS[1:3]:
+            m = pat.match(full_text)
+            if m:
+                return int(m.group(1)), int(m.group(2))
+        m = _FOOTER_PATTERNS[3].match(full_text)
+        if m:
+            return int(m.group(1)), None
+    return None, None
+
+
+def _resolve_page_mode(doc, content_start_index):
+    """根据 PAGE_NUMBER_MODE 返回 (mode, total)。
+
+    - "chinese" / "numeric"：直接返回 (mode, PAGE_TOTAL)
+    - "auto"：扫描前 MODE_DETECT_SAMPLES 个内容页（含目录页）页脚识别格式
+        1) 命中 ^第\\d+页 或包含 "页" 字 → ("chinese", total_from_共N页)
+        2) 命中 ^\\d+$ 或 ^\\d+/\\d+$ 或 ^\\d+\\s*of\\s*\\d+$ → ("numeric", total_from_denom)
+        3) 都没命中 → 默认 "chinese"（向后兼容）
+    """
+    if PAGE_NUMBER_MODE in ("chinese", "numeric"):
+        return PAGE_NUMBER_MODE, PAGE_TOTAL
+
+    # auto 模式
+    scan_range = list(range(min(MODE_DETECT_SAMPLES, doc.page_count)))
+    for i in scan_range:
+        old_num, old_total = _match_footer_token_extended(doc[i])
+        if old_num is None:
+            continue
+        # 检测到"第N页"格式 → chinese
+        full_text, _ = _collect_footer_text(doc[i])
+        if "页" in full_text:
+            return "chinese", old_total
+        # 否则 numeric
+        return "numeric", old_total
+
+    # 全部未匹配，默认 chinese（向后兼容）
+    return "chinese", PAGE_TOTAL
+
+
+def _to_roman(n):
+    """1-based 整数 → 罗马数字（支持 1..3999）"""
+    if n < 1:
+        return str(n)
+    vals = [(1000, 'M'), (900, 'CM'), (500, 'D'), (400, 'CD'),
+            (100, 'C'), (90, 'XC'), (50, 'L'), (40, 'XL'),
+            (10, 'X'), (9, 'IX'), (5, 'V'), (4, 'IV'), (1, 'I')]
+    out = []
+    for v, s in vals:
+        while n >= v:
+            out.append(s)
+            n -= v
+    return "".join(out)
+
+
+def _count_toc_pages(doc, content_start_index):
+    """从 TOC_PAGE_INDEX 起向后扫描，识别连续目录页范围。
+    返回目录页索引列表。
+    """
+    toc_pages = []
+    for i in range(TOC_PAGE_INDEX, content_start_index):
+        if _match_footer_token(doc[i]) is not None:
+            toc_pages.append(i)
+    return toc_pages
+
+
+def _write_chinese_page(page, new_num, total, font_file):
+    """写入中文页码 "第N页 [共M页]"，居中。
+
+    - font_file 非空：用 NotoSansCJK 字体嵌入中文
+    - font_file 为空：降级用 TiRo 字体（仅显示数字，"第/页"无法显示）
+    """
+    if total is not None:
+        full_text = f"第{new_num}页 共{total}页"
+    else:
+        full_text = f"第{new_num}页"
+
+    # 行级 redact（清除整段页脚）
+    for w in page.get_text("words"):
+        if w[1] > 770:
+            page.add_redact_annot(fitz.Rect(w[0] - 3, w[1] - 3, w[2] + 3, w[3] + 3))
+    page.apply_redactions()
+
+    # 居中（用 TiRo 估算宽度，NotoSansCJK 与 TiRo 字符宽度近似）
+    DIGIT_W = fitz.get_text_length("0", "TiRo", fontsize=10.0)
+    CN_W = fitz.get_text_length("页", "TiRo", fontsize=10.0)
+    # 中文字符宽度约等于数字宽度
+    char_w = (DIGIT_W + CN_W) / 2
+    nw = len(full_text) * char_w
+    cx = 297.5
+
+    if font_file:
+        page.insert_text(
+            fitz.Point(cx - nw / 2, 798), full_text,
+            fontname="noto", fontsize=10.0, color=(0, 0, 0),
+            fontfile=font_file,
+        )
+    else:
+        page.insert_text(
+            fitz.Point(cx - nw / 2, 798), full_text,
             fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
         )
 
-    # 内容页（从 content_start_index 起）
-    for i in range(content_start_index, doc.page_count):
-        page = doc[i]
-        words = page.get_text("words")
-        for w in words:
-            text = w[4].strip()
-            if w[1] > 780 and text.isdigit():
-                old_num = int(text)
-                new_num = old_num - PAGE_OFFSET
-                if new_num < 1:
-                    continue
-                new_str = str(new_num)
-                nw = len(new_str) * DIGIT_W
-                cx = (w[0] + w[2]) / 2
-                page.add_redact_annot(
-                    fitz.Rect(cx - nw / 2 - 5, w[1] - 2, cx + nw / 2 + 5, w[3] + 2)
-                )
-                page.apply_redactions()
-                page.insert_text(
-                    fitz.Point(cx - nw / 2, w[3] - 2),
-                    new_str,
-                    fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
-                )
-                break
-    print("[3/5] 页码已重编号")
+
+def _write_numeric_page(page, new_num, new_total=None):
+    """写入纯数字页码 "N" 或 "N / M"，居中（TiRo 字体，不嵌 CJK）。"""
+    if new_total is not None:
+        text = f"{new_num} / {new_total}"
+    else:
+        text = str(new_num)
+
+    # 行级 redact
+    for w in page.get_text("words"):
+        if w[1] > 770:
+            page.add_redact_annot(fitz.Rect(w[0] - 3, w[1] - 3, w[2] + 3, w[3] + 3))
+    page.apply_redactions()
+
+    DIGIT_W = fitz.get_text_length("0", "TiRo", 9.0)
+    nw = len(text) * DIGIT_W
+    cx = 297.5
+    page.insert_text(
+        fitz.Point(cx - nw / 2, 798), text,
+        fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
+    )
 
 
 def rebuild_toc(doc, resolved_chapters):
@@ -478,20 +715,34 @@ def verify(doc, resolved_chapters):
     )
     print(f"  {'✅' if wm == 0 else '⚠'} 水印残留: {wm} 处")
 
-    # 目录页页码
+    # 目录页页码（v0.3.2：兼容 chinese/numeric 模式 + 多页目录）
     page_toc = doc[TOC_PAGE_INDEX]
+    mode = globals().get("_RESOLVED_MODE", "chinese")
     for w in page_toc.get_text("words"):
         if w[1] > 780 and w[4].strip():
-            print(f"  {'✅' if w[4].strip() == 'i' else '⚠'} 目录页页码: '{w[4].strip()}'")
+            actual = w[4].strip()
+            if TOC_AS_ROMAN:
+                ok = actual in ("i", "ii", "iii", "iv", "v", "I", "II", "III", "IV", "V")
+            else:
+                # 非 roman：chinese 期望"第N页"，numeric 期望纯数字
+                ok = (mode == "chinese" and re.match(r'^第\d+', actual)) or \
+                     (mode == "numeric" and actual.isdigit())
+            print(f"  {'✅' if ok else '⚠'} 目录页页码: '{actual}' (mode={mode})")
             break
 
-    # 抽查内容页页码
+    # 模式自检行（v0.3.2 新增）
+    resolved_total = globals().get("_RESOLVED_TOTAL", None)
+    print(f"  ℹ  检测模式: {mode} | 推断总数: {resolved_total or PAGE_TOTAL or 'N/A'}")
+
+    # 抽查内容页页码（v0.3.2：4 种格式多模式匹配）
     check_indices = [4, 9, 20, 50, 80, 100]
     for idx in check_indices:
         if idx < doc.page_count:
             for w in doc[idx].get_text("words"):
-                if w[1] > 780 and w[4].strip().isdigit():
-                    print(f"  ✅ 第{idx + 1}页 页码: {w[4].strip()}")
+                if w[1] > 770 and w[4].strip():
+                    t = w[4].strip()
+                    ok = any(p.match(t) for p in _FOOTER_PATTERNS)
+                    print(f"  {'✅' if ok else '⚠'} 第{idx + 1}页 页码: {t}")
                     break
 
     # 书签
@@ -560,6 +811,12 @@ def main():
     if CONTENT_START_INDEX >= doc.page_count:
         raise ValueError(
             f"CONTENT_START_INDEX={CONTENT_START_INDEX} 超出文档范围（共 {doc.page_count} 页）"
+        )
+
+    # 3.5 校验：v0.3.2 新增 PAGE_NUMBER_MODE 取值
+    if PAGE_NUMBER_MODE not in ("chinese", "numeric", "auto"):
+        raise ValueError(
+            f"PAGE_NUMBER_MODE={PAGE_NUMBER_MODE!r} 必须是 'chinese' | 'numeric' | 'auto'"
         )
 
     # 4. 注意：先删水印再删页眉，避免 redact 改写内容流导致水印正则失效
