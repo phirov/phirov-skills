@@ -334,33 +334,44 @@ def renumber_pages(doc, content_start_index=2):
         # 从旧页脚推断的旧总数：按 PAGE_OFFSET 同步到新总数
         _RESOLVED_TOTAL = _RESOLVED_TOTAL - PAGE_OFFSET
 
-    # 目录页：清空底部原始页码
-    page0 = doc[TOC_PAGE_INDEX]
-    words0 = page0.get_text("words")
-    for w in words0:
-        if w[1] > 770 and w[4].strip():
-            page0.add_redact_annot(fitz.Rect(w[0] - 5, w[1] - 2, w[2] + 5, w[3] + 2))
-    page0.apply_redactions()
+    # 目录页处理（v0.3.3 重构：先扫描再 redact，与正文页模式解耦）
+    # 关键：必须在 redact 之前扫描，否则页脚被清空，目录页无法被识别
+    toc_pages = _count_toc_pages(doc, content_start_index)
 
-    if TOC_AS_ROMAN:
-        # 多页目录：依次输出 i, ii, iii, ...
-        toc_pages = _count_toc_pages(doc, content_start_index)
-        for k, idx in enumerate(toc_pages):
-            roman = _to_roman(k + 1)
-            doc[idx].insert_text(
-                fitz.Point(294, 797), roman,
-                fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
-            )
-    elif _RESOLVED_MODE == "numeric":
-        # numeric + 非 roman：把目录页当作内容页处理
-        old_num, old_total = _match_footer_token_extended(page0)
-        if old_num is not None:
-            new_num = old_num - PAGE_OFFSET
-            if new_num >= 1:
-                new_total = (old_total - PAGE_OFFSET) if old_total is not None else None
-                if new_total is None and _RESOLVED_TOTAL is not None:
-                    new_total = _RESOLVED_TOTAL
-                _write_numeric_page(page0, new_num, new_total)
+    if not toc_pages:
+        print(f"  ⚠ 警告: 未识别到目录页 (TOC_PAGE_INDEX={TOC_PAGE_INDEX}, "
+              f"CONTENT_START_INDEX={content_start_index})")
+    else:
+        # 步骤 1: 清除所有目录页底部原始页码（不论原页码格式）
+        for idx in toc_pages:
+            page0 = doc[idx]
+            for w in page0.get_text("words"):
+                if w[1] > 770 and w[4].strip():
+                    page0.add_redact_annot(fitz.Rect(w[0] - 5, w[1] - 2, w[2] + 5, w[3] + 2))
+            page0.apply_redactions()
+
+        # 步骤 2: 写入新页码
+        if TOC_AS_ROMAN:
+            # TOC_AS_ROMAN 强制覆盖：不论 _RESOLVED_MODE 是 chinese/numeric/auto，
+            # 目录页一律改写为罗马数字 i/ii/iii/...
+            for k, idx in enumerate(toc_pages):
+                roman = _to_roman(k + 1)
+                doc[idx].insert_text(
+                    fitz.Point(294, 797), roman,
+                    fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
+                )
+        elif _RESOLVED_MODE == "numeric":
+            # numeric + 非 roman：把目录页当作内容页处理
+            for idx in toc_pages:
+                old_num, old_total = _match_footer_token_extended(doc[idx])
+                if old_num is not None:
+                    new_num = old_num - PAGE_OFFSET
+                    if new_num >= 1:
+                        new_total = (old_total - PAGE_OFFSET) if old_total is not None else None
+                        if new_total is None and _RESOLVED_TOTAL is not None:
+                            new_total = _RESOLVED_TOTAL
+                        _write_numeric_page(doc[idx], new_num, new_total)
+        # chinese + 非 roman：目录页不重编号（保持原中文页码 7/8/...）
 
     # 内容页
     count = 0
@@ -491,12 +502,16 @@ def _resolve_page_mode(doc, content_start_index):
 
 
 def _to_roman(n):
-    """1-based 整数 → 罗马数字（支持 1..3999）"""
+    """1-based 整数 → 小写罗马数字（支持 1..3999）
+
+    目录页页码惯例为小写（i, ii, iii），与大写（I, II, III）含义相同。
+    返回小写形式以匹配学术/排版惯例。
+    """
     if n < 1:
         return str(n)
-    vals = [(1000, 'M'), (900, 'CM'), (500, 'D'), (400, 'CD'),
-            (100, 'C'), (90, 'XC'), (50, 'L'), (40, 'XL'),
-            (10, 'X'), (9, 'IX'), (5, 'V'), (4, 'IV'), (1, 'I')]
+    vals = [(1000, 'm'), (900, 'cm'), (500, 'd'), (400, 'cd'),
+            (100, 'c'), (90, 'xc'), (50, 'l'), (40, 'xl'),
+            (10, 'x'), (9, 'ix'), (5, 'v'), (4, 'iv'), (1, 'i')]
     out = []
     for v, s in vals:
         while n >= v:
@@ -505,14 +520,58 @@ def _to_roman(n):
     return "".join(out)
 
 
+def _looks_like_toc_page(page):
+    """结构特征识别：判断当前页是否是目录页
+
+    v0.3.3 新增：原 _count_toc_pages 仅靠页脚匹配"第N页"格式识别目录页，
+    导致原页码格式是纯数字（如 "8" / "8/100"）或英文 "8 of 100" 的目录页
+    不被识别，TOC_AS_ROMAN 失效。
+
+    现采用结构特征识别（与页脚格式无关）：
+        1) 含"目录"标题（最常见，允许 PyMuPDF 提取的 CJK 错码 ·/□）
+        2) 含 dots 行（ASCII "...." 或 CJK "·" 或 "□"）
+        3) 含数字编号章节（"1." / "12."）
+        满足任意两条即判定为目录页
+    """
+    text = page.get_text()
+    if not text:
+        return False
+
+    # 特征1：含"目录"标题（精确 + 容错：PyMuPDF 对 CJK 字体解码异常时 "目录"→"··"）
+    has_toc_title = bool(re.search(r'^\s*目\s*录\s*$', text, re.MULTILINE)) or \
+                    bool(re.search(r'^\s*··\s*$', text, re.MULTILINE)) or \
+                    bool(re.search(r'^\s*□□\s*$', text, re.MULTILINE)) or \
+                    bool(re.search(r'^\s*\?\?\s*$', text, re.MULTILINE)) or \
+                    ("目录" in text) or ("Contents" in text) or ("CONTENTS" in text)
+
+    # 特征2：含 dots 行（ASCII dots 或 CJK 中圆点 ·）
+    has_dots = ("...." in text) or ("····" in text) or ("·" * 4 in text) or ("..." in text and len(text) > 200)
+
+    # 特征3：含章节编号（起始位置为 "数字.")
+    has_chapter_num = bool(re.search(r'^\s*\d{1,2}\.\s*\S', text, re.MULTILINE))
+
+    # 特征4：含页码范围（行末 2-3 位数字，跟在 dots 后）—— 兜底识别
+    has_page_nums = bool(re.search(r'\.{2,}\s*\d{1,3}\s*$', text, re.MULTILINE))
+
+    score = sum([has_toc_title, has_dots, has_chapter_num, has_page_nums])
+    return score >= 2
+
+
 def _count_toc_pages(doc, content_start_index):
     """从 TOC_PAGE_INDEX 起向后扫描，识别连续目录页范围。
-    返回目录页索引列表。
+
+    v0.3.3 改造：不再依赖页脚格式匹配（"第N页"），改用结构特征识别，
+    兼容 chinese / numeric / auto 模式下所有原页码格式的目录页。
+
+    返回目录页索引列表（含 TOC_PAGE_INDEX 本身）。
     """
     toc_pages = []
     for i in range(TOC_PAGE_INDEX, content_start_index):
-        if _match_footer_token(doc[i]) is not None:
+        if _looks_like_toc_page(doc[i]):
             toc_pages.append(i)
+        else:
+            # 遇到非目录页即停止
+            break
     return toc_pages
 
 
@@ -715,20 +774,31 @@ def verify(doc, resolved_chapters):
     )
     print(f"  {'✅' if wm == 0 else '⚠'} 水印残留: {wm} 处")
 
-    # 目录页页码（v0.3.2：兼容 chinese/numeric 模式 + 多页目录）
+    # 目录页页码（v0.3.2 + v0.3.3：多页目录全部检查）
     page_toc = doc[TOC_PAGE_INDEX]
     mode = globals().get("_RESOLVED_MODE", "chinese")
-    for w in page_toc.get_text("words"):
-        if w[1] > 780 and w[4].strip():
-            actual = w[4].strip()
-            if TOC_AS_ROMAN:
-                ok = actual in ("i", "ii", "iii", "iv", "v", "I", "II", "III", "IV", "V")
-            else:
-                # 非 roman：chinese 期望"第N页"，numeric 期望纯数字
-                ok = (mode == "chinese" and re.match(r'^第\d+', actual)) or \
-                     (mode == "numeric" and actual.isdigit())
-            print(f"  {'✅' if ok else '⚠'} 目录页页码: '{actual}' (mode={mode})")
-            break
+    toc_pages = _count_toc_pages(doc, CONTENT_START_INDEX)
+    for k, idx in enumerate(toc_pages):
+        page_toc = doc[idx]
+        found = False
+        for w in page_toc.get_text("words"):
+            if w[1] > 780 and w[4].strip():
+                actual = w[4].strip()
+                if TOC_AS_ROMAN:
+                    # 罗马数字：i, ii, iii, iv, v（小写，1~5）
+                    expected = _to_roman(k + 1)
+                    ok = actual.lower() == expected
+                    print(f"  {'✅' if ok else '⚠'} 目录页 P{idx+1} 页码: '{actual}' "
+                          f"(期望罗马数字 '{expected}', mode={mode})")
+                else:
+                    # 非 roman：chinese 期望"第N页"，numeric 期望纯数字
+                    ok = (mode == "chinese" and re.match(r'^第\d+', actual)) or \
+                         (mode == "numeric" and actual.isdigit())
+                    print(f"  {'✅' if ok else '⚠'} 目录页 P{idx+1} 页码: '{actual}' (mode={mode})")
+                found = True
+                break
+        if not found:
+            print(f"  ⚠ 目录页 P{idx+1} 未检测到页码文字")
 
     # 模式自检行（v0.3.2 新增）
     resolved_total = globals().get("_RESOLVED_TOTAL", None)
