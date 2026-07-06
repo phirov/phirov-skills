@@ -6,9 +6,15 @@ CodeBuddy AI Agent 技能合集。
 
 | 技能 | 版本 | 发布日期 | 说明 |
 |------|------|----------|------|
-| [pdf-edu-processor](pdf-edu-processor/) | [v0.3.4](https://github.com/phirov/phirov-skills/releases/tag/v0.3.4) | 2026-07-06 | PDF 教辅材料后处理 — 页眉/水印删除、页码重编号（compact/plain/chinese）、目录美化、书签导航 |
+| [pdf-edu-processor](pdf-edu-processor/) | [v0.3.5](https://github.com/phirov/phirov-skills/releases/tag/v0.3.5) | 2026-07-06 | PDF 教辅材料后处理 — 页眉/水印删除、页码重编号（compact/plain/chinese）、目录美化、书签导航 |
 
-## pdf-edu-processor 最新版本 (v0.3.4)
+## pdf-edu-processor 最新版本 (v0.3.5)
+
+### v0.3.5 修复（v0.3.4 两个 bug）
+
+- **`PAGE_NUMBER_FORMAT` 失效**：`_resolve_page_mode()` 之前只读 deprecated 的 `PAGE_NUMBER_MODE`（默认 None），导致 `PAGE_NUMBER_FORMAT="compact"` 仍走 auto→chinese 默认路径。现在优先用 `_get_effective_format()`
+- **`PAGE_TOTAL` 被旧页脚覆盖**：正文 numeric 路径之前先算 `old_total - PAGE_OFFSET` 再 fallback `_RESOLVED_TOTAL`，导致手动设的 `PAGE_TOTAL=104` 被旧页脚的"107-7=100"覆盖。现在 `_RESOLVED_TOTAL` 优先级最高
+- `PAGE_TOTAL` 默认值改为 `104`，与 `PAGE_NUMBER_FORMAT="compact"` 组合输出 `1/104` 格式
 
 ### v0.3.4 新增（页码三格式 + 异常兼容）
 
@@ -68,6 +74,7 @@ CodeBuddy AI Agent 技能合集。
 
 | 版本 | 日期 | 关键变更 |
 |------|------|----------|
+| [v0.3.5](https://github.com/phirov/phirov-skills/releases/tag/v0.3.5) | 2026-07-06 | 修复 v0.3.4 两个 bug：PAGE_NUMBER_FORMAT 失效、PAGE_TOTAL 被旧页脚覆盖 |
 | [v0.3.4](https://github.com/phirov/phirov-skills/releases/tag/v0.3.4) | 2026-07-06 | 页码三格式（compact/plain/chinese），目录页标题异常兼容，集成 bug 修复 |
 | [v0.3.3](https://github.com/phirov/phirov-skills/releases/tag/v0.3.3) | 2026-07-06 | 结构特征识别目录页，罗马数字小写，与原页码格式解耦 |
 | [v0.3.2](https://github.com/phirov/phirov-skills/releases/tag/v0.3.2) | 2026-07-05 | 双模式页码（chinese/numeric/auto），多页目录罗马数字，PAGE_TOTAL 手动覆盖 |

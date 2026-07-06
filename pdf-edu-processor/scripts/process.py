@@ -53,7 +53,8 @@ MODE_DETECT_SAMPLES = 5
 
 # 总页数显式覆盖：None = 自动从页脚推断；整数 = 强制使用
 # 用于 PDF 本身未含"共N页"标记的场景（如纯数字"N"页脚）
-PAGE_TOTAL = None
+# 也可手动指定"输出总页数"以匹配 PDF 实际总页数（如 104）
+PAGE_TOTAL = 104  # 默认匹配几何专题 PDF 的实际总页数
 
 # 目录页索引（0-based）= PDF第3页 → 索引2
 TOC_PAGE_INDEX = 2
@@ -403,9 +404,15 @@ def renumber_pages(doc, content_start_index=2):
         if _RESOLVED_MODE == "chinese":
             _write_chinese_page(page, new_num, _RESOLVED_TOTAL, FONT_FILE)
         else:
-            new_total = (old_total - PAGE_OFFSET) if old_total is not None else None
-            if new_total is None and _RESOLVED_TOTAL is not None:
+            # v0.3.5 修复：PAGE_TOTAL 手动覆盖时优先用 _RESOLVED_TOTAL（已是新总数），
+            # 否则 `_RESOLVED_MODE == "numeric"` 路径会优先用 `old_total - PAGE_OFFSET`，
+            # 导致手动设的 PAGE_TOTAL=104 被旧页脚的"107-7=100"覆盖。
+            if _RESOLVED_TOTAL is not None:
                 new_total = _RESOLVED_TOTAL
+            elif old_total is not None:
+                new_total = old_total - PAGE_OFFSET
+            else:
+                new_total = None
             _write_numeric_page(page, new_num, new_total)
         count += 1
 
@@ -513,14 +520,26 @@ def _match_footer_token_extended(page):
 
 
 def _resolve_page_mode(doc, content_start_index):
-    """根据 PAGE_NUMBER_MODE 返回 (mode, total)。
+    """根据 PAGE_NUMBER_MODE / PAGE_NUMBER_FORMAT 返回 (mode, total)。
 
-    - "chinese" / "numeric"：直接返回 (mode, PAGE_TOTAL)
-    - "auto"：扫描前 MODE_DETECT_SAMPLES 个内容页（含目录页）页脚识别格式
+    v0.3.5 修复：原实现只读 deprecated 的 PAGE_NUMBER_MODE（默认 None），
+    导致用户设置 PAGE_NUMBER_FORMAT="compact" / "plain" 仍走 auto→chinese
+    默认路径。现在优先用 _get_effective_format()。
+
+    - "compact" / "plain" → ("numeric", PAGE_TOTAL)
+    - "chinese"           → ("chinese", PAGE_TOTAL)
+    - "auto" / None       → 扫描前 MODE_DETECT_SAMPLES 页页脚识别格式
         1) 命中 ^第\\d+页 或包含 "页" 字 → ("chinese", total_from_共N页)
         2) 命中 ^\\d+$ 或 ^\\d+/\\d+$ 或 ^\\d+\\s*of\\s*\\d+$ → ("numeric", total_from_denom)
         3) 都没命中 → 默认 "chinese"（向后兼容）
     """
+    # v0.3.5 优先用 PAGE_NUMBER_FORMAT（v0.3.4 引入的新字段）
+    fmt = _get_effective_format()
+    if fmt in ("compact", "plain"):
+        return "numeric", PAGE_TOTAL
+    if fmt == "chinese":
+        return "chinese", PAGE_TOTAL
+
     if PAGE_NUMBER_MODE in ("chinese", "numeric"):
         return PAGE_NUMBER_MODE, PAGE_TOTAL
 

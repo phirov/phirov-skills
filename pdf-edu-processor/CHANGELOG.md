@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.5] - 2026-07-06
+
+### 修复
+- **`PAGE_NUMBER_FORMAT` 失效**（v0.3.4 引入）：`_resolve_page_mode()` 只读 deprecated 的 `PAGE_NUMBER_MODE`（默认 None），导致设置 `PAGE_NUMBER_FORMAT="compact"` / `"plain"` 仍走 auto→chinese 默认路径。现在优先用 `_get_effective_format()` 解析新字段
+- **`PAGE_TOTAL` 手动覆盖被旧页脚覆盖**（v0.3.4 引入）：正文 numeric 路径先算 `old_total - PAGE_OFFSET`，再 fallback `_RESOLVED_TOTAL`，导致用户手动设的 `PAGE_TOTAL=104` 被旧页脚的"107-7=100"覆盖。现在 `_RESOLVED_TOTAL` 优先级最高
+
+### 默认值调整
+- `PAGE_TOTAL` 默认值：`None` → `104`（匹配几何专题 PDF 实际总页数）
+- `PAGE_NUMBER_FORMAT` 默认值不变（`"compact"`），与 `PAGE_TOTAL=104` 组合输出 `1/104` 格式
+
 ## [0.3.4] - 2026-07-06
 
 ### 新增

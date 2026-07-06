@@ -9,7 +9,7 @@ description: >-
 
 # PDF 教辅材料后处理
 
-> **v0.3.4** | 2026-07-06 | 新增 compact 页码格式 `1/56`（不嵌入 CJK 字体），目录页标题异常格式兼容，集成多项 bug 修复
+> **v0.3.5** | 2026-07-06 | 修复 `PAGE_NUMBER_FORMAT` 失效和 `PAGE_TOTAL` 被旧页脚覆盖的 bug，PAGE_TOTAL 默认 104
 
 对教辅类 PDF 进行一系列后处理：清理页眉水印、重编号页码、美化目录、添加导航。
 
@@ -43,6 +43,11 @@ description: >-
 | `remove_watermark` | 是否去除水印 | `true` |
 | `content_start_index` | 内容页起始 PDF 索引（0-based，跳过封面） | `4` |
 | `skip_indices` | 跳过页眉删除的页面索引集合 | `{0, 1, 3}` |
+
+> **v0.3.5 变更**：修复 v0.3.4 的两个 bug：
+> - `_resolve_page_mode()` 之前只读 deprecated 的 `PAGE_NUMBER_MODE`，导致 `PAGE_NUMBER_FORMAT` 失效。现在优先用 `_get_effective_format()`
+> - 正文 numeric 路径之前先算 `old_total - PAGE_OFFSET` 再 fallback `_RESOLVED_TOTAL`，导致手动设的 `PAGE_TOTAL` 被旧页脚覆盖。现在 `_RESOLVED_TOTAL` 优先级最高
+> - `PAGE_TOTAL` 默认值改为 `104`，与 `PAGE_NUMBER_FORMAT="compact"` 组合输出 `1/104` 格式
 
 > **v0.3.4 变更**：`PAGE_NUMBER_FORMAT` 配置项（替代 v0.3.2 的 `PAGE_NUMBER_MODE`）支持 4 种格式：
 > - **`compact`**（默认）— 紧凑数字 `1/56`，使用 TiRo 字体，**不嵌入 CJK**，文件体积最小（约 2.6 MB/60页）
