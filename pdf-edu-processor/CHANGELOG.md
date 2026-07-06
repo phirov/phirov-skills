@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.3.4] - 2026-07-06
+
+### 新增
+- **`PAGE_NUMBER_FORMAT` 配置项**：替代 v0.3.2 的 `PAGE_NUMBER_MODE`，明确表达"输出格式"语义
+  - **`compact`**（默认）：紧凑数字 `1/56`，使用 TiRo 字体，**不嵌入 CJK 字体**，文件体积最小
+  - **`plain`**：纯数字 `1`，最简洁格式
+  - **`chinese`**：中文页码 `第1页 共56页`，嵌入 NotoSansCJK 字体，文件体积显著增大
+  - **`auto`**：自动扫描前 5 页页脚推断最匹配格式
+- **`_write_compact_page()` / `_write_plain_page()` 函数**：拆分 v0.3.2 的 `_write_numeric_page()`，支持不同输出格式
+- **`_get_effective_format()` 函数**：字段优先级解析（`PAGE_NUMBER_FORMAT` 优先于 `PAGE_NUMBER_MODE`）
+- **`tests/test_v034.py`**：v0.3.4 升级测试套件，5 个单元测试 + 2 个端到端测试
+
+### 改进
+- **目录页标题异常格式兼容**（用户实际场景）：`verify()` 兼容章节编号的多种分隔符
+  - 支持 `"1."` (点号) / `"9 "` (空格) / `"9\n"` (换行) 等格式
+  - 解决 Quark/Word 生成 PDF 中标题与编号用空格分隔导致的误报
+- **`PAGE_NUMBER_MODE` 标记为 deprecated**：保留旧字段名供向后兼容，v0.4.0 移除
+- **TOC 页码改用 overlay 白块**（bug 修复）：原 `apply_redactions()` 会改写内容流导致 dots span 重复（12 行变 24 行），改为 `draw_rect(overlay=True)` 物理覆盖
+- **页脚匹配回退**（bug 修复）：正文文本泄漏到页脚区域时（如"于局部之和"），正则匹配失败后回退取页脚最右侧纯数字
+- **页脚重写仅清除居中区域**（bug 修复）：`_write_*_page()` 中 `add_redact_annot` 限定 x>200，保留页面左/右边缘正文内容
+- **`_TOC_LINES_DATA` 全局缓存**（bug 修复）：`rebuild_toc()` 提取的 dots 坐标缓存供 `add_navigation()` 复用，避免重新提取时把新 dots 也识别为旧 dots
+- **目录页页眉安全清理**：在 TOC 重建后用 `draw_rect` 覆盖，避免目录页与正文页眉统一删除时破坏 dots span
+
+### 文件体积影响
+- 三种数字格式（compact / plain）文件体积几乎不变（仅 TiRo 字体）
+- chinese 模式因嵌入 NotoSansCJK（~12 MB），文件体积增大 3~6 倍
+- 60 页测试 PDF 实测：compact ≈ 2.6 MB，chinese ≈ 16 MB
+
+### 向后兼容
+- 默认行为变更：从 v0.3.3 的 `auto→chinese`（中文）变为 v0.3.4 的 `compact`（紧凑数字）
+- 显式设置 `PAGE_NUMBER_MODE="chinese"` 可锁定旧的中文页码行为
+- `PAGE_NUMBER_MODE` 字段仍可使用，新字段 `PAGE_NUMBER_FORMAT` 优先
+
 ## [0.3.3] - 2026-07-06
 
 ### 新增

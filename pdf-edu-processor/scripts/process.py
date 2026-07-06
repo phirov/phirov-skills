@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PDF 教辅材料后处理脚本
+PDF 教辅材料后处理脚本 v0.3.4
 功能：页眉删除、水印删除、页码重编号、目录美化、书签、TOC链接
 依赖：pip install PyMuPDF
 """
@@ -32,11 +32,21 @@ HEADER_TEXTS = ["@建宇老师", "方法学得牛", "剑指双一流"]
 # 原文目录页=7(罗马i), 内容页8→1, 9→2, ... 100→93
 PAGE_OFFSET = 7
 
-# 页码模式（v0.3.2 新增）：
-#   "chinese" - 中文页脚 "第N页 共M页"（v0.3.1 行为，使用 NotoSansCJK 字体）
-#   "numeric" - 纯数字页脚 "N" / "N/M" / "N of M"（使用 TiRo 字体，文件更小）
-#   "auto"    - 自动扫描前 MODE_DETECT_SAMPLES 页页脚识别格式（默认）
-PAGE_NUMBER_MODE = "auto"
+# 页码输出格式（v0.3.4 新增 PAGE_NUMBER_FORMAT，替代 v0.3.2 的 PAGE_NUMBER_MODE）：
+#   "compact"  - 紧凑数字 "1/56"（默认，文件体积最小，不嵌入 CJK 字体）
+#   "plain"    - 纯数字 "1"（最简洁，不嵌入 CJK 字体）
+#   "chinese"  - 中文页码 "第1页 共56页"（文件体积显著增大，因嵌入 NotoSansCJK 字体）
+#   "auto"     - 自动扫描前 MODE_DETECT_SAMPLES 页页脚推断最匹配格式
+#
+# 文件体积对比 (示例 60 页 PDF)：
+#   compact → ~2.6 MB（TiRo 字体，仅数字）
+#   plain   → ~2.5 MB（TiRo 字体）
+#   chinese → ~16 MB （NotoSansCJK 字体，含中文"第/页"）
+PAGE_NUMBER_FORMAT = "compact"
+
+# 向后兼容：v0.3.2 字段名已 deprecated，仍可使用，未来 v0.4.0 移除
+# 如同时设置，PAGE_NUMBER_FORMAT 优先
+PAGE_NUMBER_MODE = None  # 已废弃，请使用 PAGE_NUMBER_FORMAT
 
 # auto 模式扫描的样本页数（建议 5）
 MODE_DETECT_SAMPLES = 5
@@ -216,6 +226,11 @@ def _resolve_paths():
 # 辅助函数
 # ============================================================
 
+# 全局缓存：rebuild_toc 提取的 dots 坐标，供 add_navigation 复用（v0.3.4 新增）
+# 避免 add_navigation 二次提取时把新 dots 也识别为旧 dots（导致 24 而非 12）
+_TOC_LINES_DATA = None
+
+
 def get_toc_lines_data(page):
     """从目录页提取 dots span 的精确坐标数据（dict 模式，无需人工配置）"""
     td = page.get_text("dict")
@@ -317,6 +332,7 @@ def renumber_pages(doc, content_start_index=2):
       5. PAGE_TOTAL 手动覆盖总页数
     """
     # 优先使用系统 NotoSansCJK 字体支持中文"第/页"；否则回退到 TiRo（仅数字）
+    global FONT_FILE
     FONT_FILE = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
     try:
         if not os.path.isfile(FONT_FILE):
@@ -393,7 +409,20 @@ def renumber_pages(doc, content_start_index=2):
             _write_numeric_page(page, new_num, new_total)
         count += 1
 
-    print(f"[3/5] 页码已重编号 (mode={_RESOLVED_MODE}, total={_RESOLVED_TOTAL}, count={count})")
+    print(f"[3/5] 页码已重编号 (format={_RESOLVED_MODE}, total={_RESOLVED_TOTAL}, count={count})")
+
+
+def _get_effective_format():
+    """获取有效的页码格式（v0.3.4 新增）
+
+    优先使用 PAGE_NUMBER_FORMAT，回退到 deprecated 的 PAGE_NUMBER_MODE。
+    "auto" 模式在 _resolve_page_mode() 中已被解析为具体格式。
+    """
+    if PAGE_NUMBER_FORMAT:
+        return PAGE_NUMBER_FORMAT
+    if PAGE_NUMBER_MODE:
+        return PAGE_NUMBER_MODE
+    return "compact"  # 默认
 
 
 # ============================================================
@@ -429,12 +458,13 @@ def _collect_footer_text(page):
 def _match_footer_token(page):
     """从页面页脚区域提取当前页码数字。
     返回 int 或 None（未匹配）。
-    匹配 4 种格式：第N页 / N/M / N of M / N（Quark 生成的 PDF 中"第N页"常被拆成多词，需拼接）
+    匹配 4 种格式：第N页 / N/M / N of M / N。
+    若全不匹配，回退取页脚最右侧的纯数字（处理正文文本泄漏到页脚的情况）。
+    v0.3.4 新增回退逻辑。
     """
-    full_text, _ = _collect_footer_text(page)
+    full_text, footer_words = _collect_footer_text(page)
     if not full_text:
         return None
-    # 优先级：复合模式（带"页"）→ 数字模式
     if "页" in full_text:
         m = _FOOTER_PATTERNS[0].match(full_text)
         if m:
@@ -447,14 +477,20 @@ def _match_footer_token(page):
         m = _FOOTER_PATTERNS[3].match(full_text)
         if m:
             return int(m.group(1))
+    # v0.3.4 回退: 取页脚区域最右侧的纯数字
+    for x, t in reversed(footer_words):
+        if re.match(r'^\d+$', t):
+            return int(t)
     return None
 
 
 def _match_footer_token_extended(page):
     """从页面页脚区域提取 (当前页码, 总页数)。
     返回 (int, int|None)。
+    若全不匹配，回退取页脚最右侧的纯数字（处理正文文本泄漏到页脚的情况）。
+    v0.3.4 新增回退逻辑。
     """
-    full_text, _ = _collect_footer_text(page)
+    full_text, footer_words = _collect_footer_text(page)
     if not full_text:
         return None, None
     if "页" in full_text:
@@ -469,6 +505,10 @@ def _match_footer_token_extended(page):
         m = _FOOTER_PATTERNS[3].match(full_text)
         if m:
             return int(m.group(1)), None
+    # v0.3.4 回退
+    for x, t in reversed(footer_words):
+        if re.match(r'^\d+$', t):
+            return int(t), None
     return None, None
 
 
@@ -614,15 +654,53 @@ def _write_chinese_page(page, new_num, total, font_file):
 
 
 def _write_numeric_page(page, new_num, new_total=None):
-    """写入纯数字页码 "N" 或 "N / M"，居中（TiRo 字体，不嵌 CJK）。"""
+    """v0.3.4 统一入口: 根据 PAGE_NUMBER_FORMAT 路由到具体实现。
+
+    - "compact" → "1/56"
+    - "plain"   → "1"
+    - "chinese" → "第1页 共56页" (使用 renumber_pages 中设置的全局 FONT_FILE)
+    """
+    fmt = _get_effective_format()
+    if fmt == "chinese":
+        font_file = globals().get("FONT_FILE", None)
+        return _write_chinese_page(page, new_num, _RESOLVED_TOTAL, font_file)
+    elif fmt == "plain":
+        return _write_plain_page(page, new_num, new_total)
+    else:  # compact 或 auto 解析后
+        return _write_compact_page(page, new_num, new_total)
+
+
+def _write_compact_page(page, new_num, new_total=None):
+    """v0.3.4 新增: 写入紧凑数字页码 "1/56" (无空格), TiRo 字体, 不嵌 CJK。
+
+    优势: 文件体积最小。60 页 PDF 约 2.6 MB (vs chinese 模式 16 MB)。
+    """
     if new_total is not None:
-        text = f"{new_num} / {new_total}"
+        text = f"{new_num}/{new_total}"
     else:
         text = str(new_num)
 
-    # 行级 redact
+    # 行级 redact: 仅清除居中区域的页脚数字, 保留左/右边缘的正文内容
     for w in page.get_text("words"):
-        if w[1] > 770:
+        if w[1] > 770 and w[0] > 200:
+            page.add_redact_annot(fitz.Rect(w[0] - 3, w[1] - 3, w[2] + 3, w[3] + 3))
+    page.apply_redactions()
+
+    DIGIT_W = fitz.get_text_length("0", "TiRo", 9.0)
+    nw = len(text) * DIGIT_W
+    cx = 297.5
+    page.insert_text(
+        fitz.Point(cx - nw / 2, 798), text,
+        fontname="TiRo", fontsize=9.0, color=(0, 0, 0),
+    )
+
+
+def _write_plain_page(page, new_num, new_total=None):
+    """v0.3.4 新增: 写入纯数字页码 "1" (忽略 total 参数), 最简洁格式。"""
+    text = str(new_num)
+
+    for w in page.get_text("words"):
+        if w[1] > 770 and w[0] > 200:
             page.add_redact_annot(fitz.Rect(w[0] - 3, w[1] - 3, w[2] + 3, w[3] + 3))
     page.apply_redactions()
 
@@ -653,6 +731,8 @@ def rebuild_toc(doc, resolved_chapters):
 
     page0 = doc[TOC_PAGE_INDEX]
     lines_data = get_toc_lines_data(page0)
+    global _TOC_LINES_DATA
+    _TOC_LINES_DATA = lines_data  # 缓存供 add_navigation 复用
 
     if len(lines_data) != len(resolved_chapters):
         print(f"  ⚠ 警告: dots 行数 ({len(lines_data)}) ≠ 章节配置数 ({len(resolved_chapters)})")
@@ -706,13 +786,14 @@ def rebuild_toc(doc, resolved_chapters):
 
 
 def add_navigation(doc, resolved_chapters):
-    """添加书签和目录跳转链接（使用动态提取的行坐标）
+    """添加书签和目录跳转链接（使用 rebuild_toc 缓存的动态行坐标）
 
     参数：
         resolved_chapters: 完整 [编号, 标题, 新页码, PDF索引(0-based)] 列表
     """
     page0 = doc[TOC_PAGE_INDEX]
-    lines_data = get_toc_lines_data(page0)
+    global _TOC_LINES_DATA
+    lines_data = _TOC_LINES_DATA if _TOC_LINES_DATA else get_toc_lines_data(page0)
 
     if len(lines_data) != len(resolved_chapters):
         print(f"  ⚠ 警告: dots 行数 ({len(lines_data)}) ≠ 章节配置数 ({len(resolved_chapters)})")
@@ -776,7 +857,7 @@ def verify(doc, resolved_chapters):
 
     # 目录页页码（v0.3.2 + v0.3.3：多页目录全部检查）
     page_toc = doc[TOC_PAGE_INDEX]
-    mode = globals().get("_RESOLVED_MODE", "chinese")
+    mode = globals().get("_RESOLVED_MODE", "compact")
     toc_pages = _count_toc_pages(doc, CONTENT_START_INDEX)
     for k, idx in enumerate(toc_pages):
         page_toc = doc[idx]
@@ -841,18 +922,25 @@ def verify(doc, resolved_chapters):
             continue
         # 取目标页文本，截取章节编号部分
         target_text = doc[target_idx].get_text()
-        # 提取章节编号，如 "1." "12." "23."
-        num_str = str(i + 1) + "."
-        if num_str in target_text:
+        # 提取章节编号，兼容 "1." / "9 " / "9\n" / "9、" 等异常分隔符 (v0.3.4 增强)
+        num_str_dot = str(i + 1) + "."
+        num_str_space = str(i + 1) + " "
+        num_str_nl = str(i + 1) + "\n"
+        if num_str_dot in target_text or num_str_space in target_text or num_str_nl in target_text:
             # 进一步校验：章节标题前 5 个汉字是否匹配
-            short_title = expected_title.split(".", 1)[1][:5] if "." in expected_title else expected_title[:5]
+            if "." in expected_title:
+                short_title = expected_title.split(".", 1)[1][:5]
+            elif " " in expected_title:
+                short_title = expected_title.split(" ", 1)[1][:5]
+            else:
+                short_title = expected_title[:5]
             if short_title in target_text:
                 pass  # 匹配，静默通过
             else:
                 print(f"  ⚠ link{i} → P{target_idx+1}: 编号匹配但标题不符 (期望 '{short_title}')")
                 mismatch_count += 1
         else:
-            print(f"  ⚠ link{i} → P{target_idx+1}: 未找到章节编号 '{num_str}'")
+            print(f"  ⚠ link{i} → P{target_idx+1}: 未找到章节编号 '{num_str_dot}' 或 '{num_str_space}'")
             mismatch_count += 1
     if mismatch_count == 0:
         print(f"  ✅ 所有 {len(links)} 个链接均精准命中目标章节")
@@ -884,9 +972,11 @@ def main():
         )
 
     # 3.5 校验：v0.3.2 新增 PAGE_NUMBER_MODE 取值
-    if PAGE_NUMBER_MODE not in ("chinese", "numeric", "auto"):
+    # v0.3.4 校验 PAGE_NUMBER_FORMAT
+    fmt = _get_effective_format()
+    if fmt not in ("compact", "plain", "chinese", "auto"):
         raise ValueError(
-            f"PAGE_NUMBER_MODE={PAGE_NUMBER_MODE!r} 必须是 'chinese' | 'numeric' | 'auto'"
+            f"PAGE_NUMBER_FORMAT={fmt!r} 必须是 'compact' | 'plain' | 'chinese' | 'auto'"
         )
 
     # 4. 注意：先删水印再删页眉，避免 redact 改写内容流导致水印正则失效
@@ -896,6 +986,14 @@ def main():
     renumber_pages(doc, content_start_index=CONTENT_START_INDEX)
     rebuild_toc(doc, resolved_chapters)
     add_navigation(doc, resolved_chapters)
+    # 目录页页眉清理 (之前跳过索引2避免 dots 重复, TOC重建后安全覆盖)
+    for b in doc[TOC_PAGE_INDEX].get_text("blocks"):
+        text = b[4].strip()
+        if any(t in text for t in HEADER_TEXTS):
+            doc[TOC_PAGE_INDEX].draw_rect(
+                fitz.Rect(b[0] - 3, b[1] - 3, b[2] + 3, b[3] + 3),
+                fill=(1, 1, 1), color=None, overlay=True,
+            )
 
     # 5. 保存
     tmp = output_path + ".tmp"

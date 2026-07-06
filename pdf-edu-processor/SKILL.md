@@ -9,7 +9,7 @@ description: >-
 
 # PDF 教辅材料后处理
 
-> **v0.3.3** | 2026-07-06 | 目录页页码统一改为罗马数字（与原页码格式解耦），结构特征识别替代页脚匹配
+> **v0.3.4** | 2026-07-06 | 新增 compact 页码格式 `1/56`（不嵌入 CJK 字体），目录页标题异常格式兼容，集成多项 bug 修复
 
 对教辅类 PDF 进行一系列后处理：清理页眉水印、重编号页码、美化目录、添加导航。
 
@@ -33,7 +33,8 @@ description: >-
 | `output_pdf` | 输出 PDF 路径（v0.3.1：None 时自动按原名+"-整理后"生成） | `None` 或 `/workspace/output.pdf` |
 | `header_texts` | 要删除的页眉文字列表 | `["@建宇老师", "方法学得牛", "剑指双一流"]` |
 | `page_offset` | 页码偏移量（旧页码 - offset = 新页码） | `7`（页码 8→1, 9→2...） |
-| `page_number_mode` | 页码模式：`chinese` / `numeric` / `auto`（v0.3.2 默认 auto） | `"auto"` |
+| `page_number_format` | **v0.3.4 新增** 页码输出格式：`compact` (`"1/56"`) / `plain` (`"1"`) / `chinese` (`"第1页 共56页"`) / `auto` | `"compact"` |
+| `page_number_mode` | v0.3.2 字段，已 deprecated，请使用 `page_number_format` | `None` |
 | `page_total` | 总页数显式覆盖：`None` = 自动推断（v0.3.2） | `100` |
 | `mode_detect_samples` | auto 模式扫描样本数（v0.3.2） | `5` |
 | `toc_page_index` | 目录页 PDF 索引（0-based） | `2` |
@@ -43,6 +44,14 @@ description: >-
 | `content_start_index` | 内容页起始 PDF 索引（0-based，跳过封面） | `4` |
 | `skip_indices` | 跳过页眉删除的页面索引集合 | `{0, 1, 3}` |
 
+> **v0.3.4 变更**：`PAGE_NUMBER_FORMAT` 配置项（替代 v0.3.2 的 `PAGE_NUMBER_MODE`）支持 4 种格式：
+> - **`compact`**（默认）— 紧凑数字 `1/56`，使用 TiRo 字体，**不嵌入 CJK**，文件体积最小（约 2.6 MB/60页）
+> - **`plain`** — 纯数字 `1`，最简洁，TiRo 字体，文件最小
+> - **`chinese`** — 中文页码 `第1页 共56页`，使用 NotoSansCJK 字体，**文件体积显著增大**（约 16 MB/60页）
+> - **`auto`** — 自动扫描前 5 页页脚推断最匹配格式
+>
+> 三种数字格式（compact / plain）几乎不增加 PDF 体积，仅 chinese 模式会嵌入 NotoSansCJK 字体导致文件增大 3~6 倍。目录页页码验证增强：兼容章节标题异常格式（`"9 排列之捆绑与插空"` 空格分隔而非点号）。其他改进：TOC 页码改用 overlay 白块覆盖（避免 dots 重复）、页脚匹配回退取最右侧数字、目录页页眉安全清理、`_TOC_LINES_DATA` 缓存避免重复提取。
+>
 > **v0.3.3 变更**：目录页页码格式与原 PDF 格式完全解耦。新增 `_looks_like_toc_page()` 结构特征识别（"目录"标题 / dots 行 / 章节编号 / 页码范围）替代原 `_match_footer_token` 页脚匹配，确保不论原页码是"第7页 共20页"、"7 / 20"、"7 of 20" 还是纯数字 "7"，目录页都能被正确识别并改写为小写罗马数字 i/ii/iii。`_to_roman()` 输出小写。`verify()` 升级为对所有目录页逐一检查。
 >
 > **v0.3.2 变更**：新增 `PAGE_NUMBER_MODE` 双模式支持。`auto` 模式自动扫描前 5 页页脚识别中英文格式，识别到纯数字（`"8"` / `"8/107"` / `"8 of 107"`）时自动切换为 `numeric` 模式（TiRo 字体、居中、不嵌 CJK）。多页目录支持罗马数字 `i`/`ii`/`iii`。新增 `PAGE_TOTAL` 配置项允许手动覆盖总页数。
